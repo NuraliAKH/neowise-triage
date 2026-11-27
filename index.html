@@ -18,18 +18,51 @@
     <textarea id="message" rows="4"></textarea>
     <button type="submit">Разобрать заявку</button>
   </form>
-  <pre id="result" aria-live="polite"></pre>
+  <div aria-live="polite">
+    <p id="notice"></p>
+    <section id="result" hidden>
+      <p><strong>Тема:</strong> <span id="topic"></span></p>
+      <p><strong>Черновик ответа</strong> (проверьте перед отправкой клиенту):</p>
+      <pre id="draft"></pre>
+    </section>
+  </div>
   <script type="module">
+    const TOPIC_LABELS = { delivery: "Доставка", pricing: "Цены и стоимость", other: "Другое" };
     const form = document.querySelector("form");
+    const button = form.querySelector("button");
+    const notice = document.querySelector("#notice");
     const result = document.querySelector("#result");
+    let lastRequest = 0;
+
+    function show(message, data = null) {
+      notice.textContent = message;
+      // Любой не-ready ответ стирает прежний черновик, чтобы его не отправили по ошибке.
+      result.hidden = !data;
+      document.querySelector("#topic").textContent = data ? TOPIC_LABELS[data.topic] ?? data.topic : "";
+      document.querySelector("#draft").textContent = data ? data.draft : "";
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const reply = await fetch("/api/triage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: document.querySelector("#message").value }),
-      });
-      result.textContent = JSON.stringify(await reply.json(), null, 2);
+      const requestId = ++lastRequest;
+      show("Разбираем заявку…");
+      button.disabled = true;
+      try {
+        const reply = await fetch("/api/triage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: document.querySelector("#message").value }),
+        });
+        const data = await reply.json();
+        if (requestId !== lastRequest) return; // пришёл ответ на устаревший запрос
+        if (data.status === "ready") show("", data);
+        else if (data.status === "invalid_input") show("Введите текст заявки.");
+        else show("Автоматический разбор не удался. Разберите заявку вручную: определите тему и напишите ответ сами.");
+      } catch {
+        if (requestId === lastRequest) show("Сервис недоступен. Разберите заявку вручную.");
+      } finally {
+        if (requestId === lastRequest) button.disabled = false;
+      }
     });
   </script>
 </body>
